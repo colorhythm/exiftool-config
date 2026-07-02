@@ -1,0 +1,31 @@
+{
+	"name": "@colorhythm/exiftool-config",
+	"version": "1.0.0",
+	"description": "Colorhythm's production ExifTool config: Photoshop path analytics (PathCount, UniquePathPoints, TotalPathPoints), largest-preview selection (BigImage), PNG transparency surfacing, drone/multispectral XMP namespaces, and workflow composites.",
+	"license": "MIT",
+	"author": "Colorhythm LLC",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/colorhythm/exiftool-config.git"
+	},
+	"type": "module",
+	"main": "./index.js",
+	"exports": {
+		".": "./index.js",
+		"./ExifTool_config": "./ExifTool_config",
+		"./*": "./*"
+	},
+	"files": [
+		"ExifTool_config",
+		"index.js"
+	],
+	"keywords": [
+		"exiftool",
+		"exiftool-config",
+		"metadata",
+		"photoshop-paths",
+		"8bim",
+		"preview-extraction",
+		"xmp"
+	]
+}

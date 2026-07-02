@@ -1,0 +1,860 @@
+#------------------------------------------------------------------------------
+# File:         ExifTool_config  -->  ~/.ExifTool_config
+#
+# Description:  Sample user configuration file for Image::ExifTool
+#
+# Notes:        This example file shows how to define your own shortcuts and
+#               add new EXIF, IPTC, XMP, PNG, MIE and Composite tags, as well
+#               as how to specify preferred lenses for the LensID tag and
+#               define default values for ExifTool options.
+#
+#               Note that unknown tags may be extracted even if they aren't
+#               defined, but tags must be defined to be written.  Also note
+#               that it is possible to override an existing tag definition
+#               with a user-defined tag.
+#
+#               To activate this file, rename it to ".ExifTool_config" and
+#               place it in your home directory or the exiftool application
+#               directory.  (On Windows and Mac systems this must be done via
+#               the command line since the GUI's don't allow filenames to begin
+#               with a dot.  Use the "rename" command in Windows or "mv" on the
+#               Mac.)  This causes ExifTool to automatically load the file when
+#               run.  Your home directory is determined by the first defined of
+#               the following environment variables:
+#
+#                   1. EXIFTOOL_HOME
+#                   2. HOME
+#                   3. HOMEDRIVE + HOMEPATH
+#                   4. (the current directory)
+#
+#               Alternatively, the -config option of the exiftool application
+#               may be used to load a specific configuration file (note that
+#               it must be the first option on the command line):
+#
+#                   exiftool -config ExifTool_config ...
+#
+# The %Image::ExifTool::UserDefined hash defines new tags to be added
+# to existing tables.
+#------------------------------------------------------------------------------
+# Description:  This config generates user-defined tags for Photoshop
+#               paths, and may be used to extract path names and/or Bezier knot
+#               anchor points, or copy path information from one file to
+#               another.
+#
+#               The anchor points may be extracted along with the path names by
+#               setting the "Anchor" user parameter (ie. "-userparam anchor"),
+#               or by themselves with "AnchorOnly".
+#
+#               An "AllPaths" shortcut tag is also provided represent all
+#               Photoshop path tags.  This shortcut must be used when copying
+#               because these tags are marked as "Protected" so they won't be
+#               copied by default (also see the notes below).
+#
+#               Path anchor points are converted to pixel coordinates by the
+#               Composite PathPixXXX tags, and an "AllPathPix" shortcut is
+#               provided to represent these tags.
+#
+#               Finally, a Composite PathCount tag is provided to return the
+#               number of paths in an image, and a TotalPathPoints tag counts
+#               the total number of path anchor points.
+#
+# Notes:     1) Print conversion must be disabled to be able to copy the paths
+#               (via either the -n option, or by adding a "#" to the tag name,
+#               eg. "-tagsfromfile SRC -allpaths#").
+#
+#            2) When copying the paths, OriginPathInfo must also be copied
+#               (otherwise Photoshop may give a "program error" and refuse to
+#               load the image).
+#
+# Usage:
+#
+#   1) Extract Photoshop path names:
+#
+#      exiftool -config photoshop_paths.config -allpaths FILE
+#
+#   2) Extract Photoshop path names and anchor points:
+#
+#      exiftool -config photoshop_paths.config -userparam anchor -allpaths FILE
+#
+#   3) Extract Photoshop path anchor points only:
+#
+#      exiftool -config photoshop_paths.config -userparam anchoronly -allpaths FILE
+#
+#   4) Copy all Photoshop paths from one file (SRC) to another (DST):
+#      (note that OriginPathInfo must also be copied when copying all paths)
+#
+#      exiftool -config photoshop_paths.config -tagsfromfile SRC -allpaths# -originpathinfo DST
+#
+#   5) Extract path names and anchor points in pixel coordinates:
+#
+#      exiftool -config photoshop_paths.config -allpathpix FILE
+#
+# Requires:     ExifTool version 9.95 or later
+#
+# Notes:        A "-" before a set of Bezier path points indicates a closed subpath,
+#               and a "+ indicates the start of an open subpath.
+#
+# Revisions:    2015/05/07 - P. Harvey Created
+#               2016/09/14 - PH Added feature to allow extracting anchor points
+#               2017/01/24 - PH Added PathCount and PathPix Composite tags
+#               2017/02/02 - PH Added support for copying OriginPathInfo
+#               2017/02/22 - PH Fixed problem printing some paths
+#               2017/03/19 - PH Added "-" or "+" at the start of closed or open
+#                               subpath respectively
+#               2017/06/03 - PH Added TotalPathPoints
+#               2017/07/17 - PH Added UniquePathPoints
+#               2021/12/18 - AT Added extracting bezier control points
+#
+# References:   http://u88.n24.queensu.ca/exiftool/forum/index.php/topic,1621.0.html
+#               http://u88.n24.queensu.ca/exiftool/forum/index.php/topic,3910.0.html
+#               http://u88.n24.queensu.ca/exiftool/forum/index.php/topic,6647.0.html
+#------------------------------------------------------------------------------
+
+# Print Photoshop path name and/or anchor points
+# Inputs: 0) reference to Photoshop path data, 1) ExifTool object reference
+#         2-3) optional image width/height to convert anchor points to pixels
+# Returns: String with name and/or Bezier knot anchor points
+sub PrintPath($$;$$)
+{
+    my ($val, $et, $w, $h) = @_;
+    my ($pos, $name, @rtn);
+    my $len = length($$val) - 26;
+
+    # recover exiftool-added path name if it exists
+    if ($$val =~ m{.*/#(.{0,255})#/$}s) {
+        $name = $1;
+        $len -= length($1) + 4;
+    } else {
+        $name = '<none>';
+    }
+    my $anchorOnly = $et->Options(UserParam => 'AnchorOnly');
+    push @rtn, $name unless $anchorOnly;
+
+    # loop through path points and extract anchor points if specified
+    if ($anchorOnly or $et->Options(UserParam => 'Anchor') or defined $w) {
+        SetByteOrder('MM');
+        for ($pos=0; $pos<=$len; $pos+=26) {
+            my $type = Get16u($val, $pos);
+            $type == 0 and push(@rtn, '-'), next;
+            $type == 3 and push(@rtn, '+'), next;
+            # Bezier knot records are types 1, 2, 4 and 5
+             next unless {1=>1,2=>1,4=>1,5=>1}->{$type};
+            # the anchor point is at offset 10 in the Bezier knot record
+            # (fixed-point values with 24-bits after the decimal point)
+            my $y1 = Get32s($val, $pos+2) / 0x1000000;  # (vertical component first)
+            my $x1 = Get32s($val, $pos+6) / 0x1000000;
+            if (defined $w and defined $h) {
+                push @rtn, sprintf('(%g,%g)', $x1 * $w, $y1 * $h);
+            } else {
+                push @rtn, sprintf('(%g,%g)', $x1, $y1);
+            }
+        my $y = Get32s($val, $pos+10) / 0x1000000;  # (vertical component first)
+            my $x = Get32s($val, $pos+14) / 0x1000000;
+            if (defined $w and defined $h) {
+                push @rtn, sprintf('(%g,%g)', $x * $w, $y * $h);
+            } else {
+                push @rtn, sprintf('(%g,%g)', $x, $y);
+            }
+        my $y2 = Get32s($val, $pos+18) / 0x1000000;  # (vertical component first)
+            my $x2 = Get32s($val, $pos+22) / 0x1000000;
+            if (defined $w and defined $h) {
+                push @rtn, sprintf('(%g,%g)', $x2 * $w, $y2 * $h);
+            } else {
+                push @rtn, sprintf('(%g,%g)', $x2, $y2);
+            }
+        }
+    }
+    return join ' ', @rtn;
+}
+
+%Image::ExifTool::UserDefined = (
+    'Image::ExifTool::Photoshop::Main' => {
+        0xbb8 => {
+            Name => 'OriginPathInfo',
+            Flags => [ qw(Writable Protected Binary SetResourceName) ],
+        },
+        # generate tags for each of the 998 possible Photoshop paths
+        map { $_ => {
+            Name => sprintf('Path%x', $_),
+            Description => sprintf('Path %x', $_),
+            Flags => [ qw(Writable Protected Binary ConvertBinary SetResourceName) ],
+            PrintConv => \&PrintPath,
+        } } (0x401, 0x7d0 .. 0xbb5),
+    },
+    'Image::ExifTool::Exif::Main' => {
+        0xc7e0 => {
+            Name => 'Affinity',
+            Writable => 'undef',
+            WriteGroup => 'IFD0',
+            Binary => 1,
+            Format => undef,
+        },
+    },
+    # new XMP namespaces must be added to the Main XMP table:
+    'Image::ExifTool::XMP::Main' => {
+        cq => { # <-- must be the same as the NAMESPACE prefix
+            SubDirectory => {
+                TagTable => 'Image::ExifTool::UserDefined::cq',
+            },
+        },
+        Camera => {
+            SubDirectory => {
+                TagTable => 'Image::ExifTool::UserDefined::Camera',
+            },
+        },
+        onone => {
+            SubDirectory => { TagTable => 'Image::ExifTool::UserDefined::onone' },
+        },
+    },
+    'Image::ExifTool::PNG::Main' => {
+        PLTE => {
+            Name => 'Palette',
+            ValueConv => q{
+                my @colors = unpack('C*',$val);
+                # reference: https://www.w3.org/TR/png/#11PLTE
+                my $str = '[';
+                while (@colors) {
+                    my @rgb = splice(@colors, 0, 3);
+                    $str .= '[' . join(',', @rgb) . '],';
+                }
+                $str =~ s/,$/]/; # Replace last comma with closing bracket
+                return $str;
+            },
+        },
+        sPLT => {
+            Name => 'SuggestedPalette',
+            ValueConv => q{
+                my @values = unpack('C*',$val);
+
+                # reference: https://www.w3.org/TR/png/#11sPLT
+                # Identify the position of the null character that separates the palette name from the data
+                my $null_pos = 0;
+                ++$null_pos until $values[$null_pos] == 0 || $null_pos > $#values;
+
+                # Extract the palette name using the bytes up to the null position
+                my $palette_name = pack('C*', @values[0..$null_pos-1]);
+                $palette_name = unpack("A*", $palette_name);
+
+                # Sample depth is the byte immediately following the null separator
+                my $sample_depth = $values[$null_pos + 1];
+
+                # Determine the size of each entry based on the sample depth
+                my $entry_size = $sample_depth == 8 ? 6 : 10;
+                my @entries;
+
+                # Process each palette entry based on the determined entry size
+                for (my $i = $null_pos + 2; $i <= $#values; $i += $entry_size) {
+                    my ($r, $g, $b, $a, $frequency);
+                    if ($sample_depth == 8) {
+                        # For 8-bit sample depth, directly assign the values.
+                        ($r, $g, $b, $a, $frequency) = @values[$i..$i+5];
+                        $frequency = ($frequency << 8) | $values[$i+5]; # Correcting frequency assignment for 8-bit depth
+                    } else {
+                        # For 16-bit sample depth, combine each pair of bytes to form 16-bit values
+                        $r = ($values[$i] << 8) | $values[$i+1];
+                        $g = ($values[$i+2] << 8) | $values[$i+3];
+                        $b = ($values[$i+4] << 8) | $values[$i+5];
+                        $a = ($values[$i+6] << 8) | $values[$i+7];
+                        $frequency = ($values[$i+8] << 8) | $values[$i+9];
+                    }
+                    # Add the processed entry to the list of entries
+                    push @entries, { R => $r, G => $g, B => $b, A => $a, Frequency => $frequency };
+                }
+                # Serialize to JSON by hand — keeps this config free of
+                # non-core modules (JSON.pm is absent on minimal perls,
+                # including wasm builds of ExifTool).
+                my $esc = sub {
+                    my $s = shift;
+                    $s =~ s/([\\"])/\\$1/g;
+                    $s =~ s/([\x00-\x1f])/sprintf("\\u%04x", ord($1))/ge;
+                    return $s;
+                };
+                my $entries_json = join(",", map {
+                    sprintf('{"R":%d,"G":%d,"B":%d,"A":%d,"Frequency":%d}',
+                        $_->{R}, $_->{G}, $_->{B}, $_->{A}, $_->{Frequency})
+                } @entries);
+                return sprintf('{"PaletteName":"%s","SampleDepth":%d,"Entries":[%s]}',
+                    $esc->($palette_name), $sample_depth, $entries_json);
+            },
+        },
+    },
+    # Composite tags are added to the Composite table:
+    'Image::ExifTool::Composite' => {
+        # Composite tags are unique:  The Require/Desire elements specify
+        # tags that must/may exist, and the keys of these hashes are used as
+        # indices in the @val array of the ValueConv expression to access
+        # the numerical (-n) values of these tags.  All Require'd tags must
+        # exist for the Composite tag to be evaluated.  If no Require'd tags
+        # are specified, then at least one of the Desire'd tags must exist.
+        # See the Composite table in Image::ExifTool::Exif for more
+        # examples, and lib/Image/ExifTool/README for all of the details.
+        # the next few examples demonstrate simplifications which may be
+        # used if only one tag is Require'd or Desire'd:
+        # 1) the Require lookup may be replaced with a simple tag name
+        # 2) "$val" may be used to represent "$val[0]" in the expression
+        FileExtension => {
+            Require => 'FileName',
+            ValueConv => '$val=~/\.([^.]*)$/; $1',
+        },
+        # CircleOfConfusion alternative calculations
+        CircleOfConfusion => {
+            Require => 'ScaleFactor35efl',
+            Groups => { 2 => 'Camera' },
+            ValueConv => 'sqrt(24*24+36*36) / ($val * 1750)',
+            # an optional PrintConv may be used to format the value
+            PrintConv => 'sprintf("%.3f mm",$val)',
+        },
+        CircleOfConfusion1440 => {
+            Require => 'ScaleFactor35efl',
+            Groups => { 2 => 'Camera' },
+            ValueConv => 'sqrt(24*24+36*36) / ($val * 1440)',
+            # an optional PrintConv may be used to format the value
+            PrintConv => 'sprintf("%.3f mm",$val)',
+        },
+        # generate a description for this file type
+        FileTypeDescription => {
+            Require => 'FileType',
+            ValueConv => 'GetFileType($val,1) || $val',
+        },
+        # calculate physical image size based on resolution
+        PhysicalImageSize => {
+            Require => {
+                0 => 'ImageWidth',
+                1 => 'ImageHeight',
+                2 => 'XResolution',
+                3 => 'YResolution',
+                4 => 'ResolutionUnit',
+            },
+            ValueConv => '$val[0]/$val[2] . " " . $val[1]/$val[3]',
+            # (the @prt array contains print-formatted values)
+            PrintConv => 'sprintf("%.1fx%.1f $prt[4] @ $prt[2] %s", $val[0]/$val[2], $val[1]/$val[3], $prt[4] eq "cm" ? "ppcm" : "ppi")',
+        },
+        # writes string to HierarchicalSubject and leaf keywords to IPTC:Keywords and
+        # XMP:Subject
+        #   Example:
+        #       exiftool -config hstokeywords.config -hstokeywords="People|Family|John"
+        #       -hstokeywords="People|Family|Mary" /path/to/files/
+        #           [IPTC]    Keywords: John, Mary
+        #           [XMP-dc]  Subject: John, Mary
+        #           [XMP-lr]  HierarchicalSubject: People|Family|John, People|Family|Mary
+        hstokeywords => {
+            Require => 'XMP:HierarchicalSubject',
+            Writable => 1,
+            List => 'Bag',
+            WriteAlso => {
+                'XMP:HierarchicalSubject' =>'$val',
+                'IPTC:Keywords' => q {
+                        # $opts{EditGroup} = 1; # To force IPTC:Keywords to always be
+                                                # written remove this line or comment it
+                                                # out with a leading #
+                        return undef if not defined $val;
+                        my @temp = (ref $val) ?  @{$val} : ($val);
+                        s/.*(?:^|\|)([^|]*)$/$1/ for @temp;
+                        return(@temp ? \@temp :undef);
+                    },
+                'XMP:Subject' => q{
+                    return undef if not defined $val;
+                    my @temp = (ref $val) ?  @{$val} : ($val);
+                    s/.*(?:^|\|)([^|]*)$/$1/ for @temp;
+                    return(@temp ? \@temp :undef);
+                },
+            },
+            ValueConv => '$val',
+        },
+        PNGTransparency => {
+            Require => {
+                0 => 'PNG:Transparency',
+                1 => 'PNG:ColorType',
+            },
+            ValueConv => q{
+                my @transparencyData = unpack('C*', ${$val[0]});
+                if ($val[1] == 3) { # Indexed-color/palette
+                    return '[' . join(',', @transparencyData) . ']';
+                } elsif ($val[1] == 0) { # Grayscale
+                    # Unpack as a single 2-byte value
+                    my ($transparency) = unpack('n', ${$val[0]});
+                    return $transparency;
+                } elsif ($val[1] == 2) { # RGB
+                    # Unpack the first three 2-byte values from transparency data
+                    my @rgbaTransparency = unpack('n3', ${$val[0]});
+                    return '[' . join(',', @rgbaTransparency) . ']';
+                }
+                return '';
+            },
+        },
+        # combine fields reporting Pixel Aspect Ratio
+        PAR => {
+            Desire => {
+                # PAR information tags ordered by precedence
+                0 => 'Photoshop:PixelAspectRatio',
+                1 => 'OpenEXR:PixelAspectRatio',
+                2 => 'Radiance:PixelAspectRatio',
+                3 => 'GIF:PixelAspectRatio',
+                4 => 'MakerNotes:PixelAspectRatio',
+            },
+            ValueConv => '$val[0] || $val[1] || $val[2] || $val[3] || $val[4]',
+        },
+        # make megapixels calculation accurate to .xxx degrees
+        MyMegapixels => {
+            Require => {
+                0 => 'Megapixels',
+            },
+            ValueConv => '$val = sprintf("%.3f",$val)',
+        },
+        TotalNumberPixels => {
+            Require => {
+                0 => 'ImageWidth',
+                1 => 'ImageHeight',
+            },
+            ValueConv => '$val[0]*$val[1]',
+        },
+        # [advanced] select largest JPEG preview image
+        BigImage => {
+            Groups => { 2 => 'Preview' },
+            Desire => {
+                0 => 'JpgFromRaw',
+                1 => 'PreviewImage',
+                2 => 'OtherImage',
+                # (DNG and A100 ARW may be have 2 PreviewImage's)
+                3 => 'PreviewImage (1)',
+                # (if the MPF has 2 previews, MPImage2 or MPImage3 could be the larger one)
+                4 => 'MPImage2',
+                5 => 'MPImage3',
+            },
+            # ValueConv may also be a code reference
+            # Inputs: 0) reference to list of values, 1) ExifTool object
+            ValueConv => sub {
+                my $val = shift;
+                my ($image, $bigImage, $len, $bigLen);
+                foreach $image (@$val) {
+                    next unless ref $image eq 'SCALAR';
+                    # check for JPEG image (or "Binary data" if -b not used)
+                    next unless $$image =~ /^(\xff\xd8\xff|Binary data (\d+))/;
+                    $len = $2 || length $$image; # get image length
+                    # save largest image
+                    next if defined $bigLen and $bigLen >= $len;
+                    $bigLen = $len;
+                    $bigImage = $image;
+                }
+                return $bigImage;
+            },
+        },
+        #count paths and path points
+        PathCount => {
+            Desire => {
+                map { $_-0x7d0 => sprintf('Path%x', $_) } (0x7d0 .. 0xbb5),
+            },
+            ValueConv => sub {
+                my ($val, $self) = @_;
+                my $count = 0;
+                my $pts = 0;
+                my $uniq = 0;
+                my %uniq;
+                foreach (@$val) {
+                    next unless defined $_;
+                    ++$count;
+                    # determine the total number of path anchor points
+                    my $len = length($$_) - 26;
+                    for ($pos=0; $pos<=$len; $pos+=26) {
+                        SetByteOrder('MM');
+                        my $type = Get16u($_, $pos);
+                        last if $type == 0x2f23; # (start of path name added by ExifTool)
+                        next unless {1=>1,2=>1,4=>1,5=>1}->{$type};
+                        my $pt = substr($$_, $pos+10, 8);
+                        $uniq{$pt} or ++$uniq, $uniq{$pt} = 1;
+                        ++$pts;
+                    }
+                }
+                $$self{TotalPathPoints} = $pts;
+                $$self{UniquePathPoints} = $uniq;
+                return $count;
+            },
+        },
+        UniquePathPoints => {
+            Require => 'PathCount',
+            ValueConv => '$$self{UniquePathPoints}',
+        },
+        TotalPathPoints => {
+            Require => 'PathCount',
+            ValueConv => '$$self{TotalPathPoints}',
+        },
+        map { sprintf('PathPix%x', $_) => {
+            Require => {
+                0 => 'ImageWidth',
+                1 => 'ImageHeight',
+                2 => sprintf('Path%x', $_),
+            },
+            Description => sprintf('Path Pix %x', $_),
+            ValueConv => sub {
+                my ($val, $et) = @_;
+                PrintPath($$val[2], $et, $$val[0], $$val[1]);
+            },
+        } } (0x401, 0x7d0 .. 0xbb5),
+    },
+);
+
+# Custom XMP Namespace for Pix4D cameras
+%Image::ExifTool::UserDefined::Camera = (
+    GROUPS => { 0 => 'XMP', 1 => 'XMP-Camera', 2 => 'Camera' },
+    NAMESPACE => { 'Camera' => 'http://pix4d.com/camera/1.0/'  },
+    WRITABLE => 'string',
+    Yaw             => { Writable => 'real' },
+    Pitch           => { Writable => 'real' },
+    Roll            => { Writable => 'real' },
+    IMUSampleSize   => { Writable => 'integer' },
+    IMUTimeOffset   => { Writable => 'integer' },
+    LineReadoutTime => { Writable => 'integer' },
+    IMUFrequency    => { Writable => 'real' },
+    PrincipalPoint  => { },
+    ModelType       => { },
+    PerspectiveFocalLength => { Writable => 'real' },
+    PerspectiveDistortion  => { },
+    IMULinearVelocity => { },
+    GPSXYAccuracy   => { Writable => 'real' },
+    GPSZAccuracy    => { Writable => 'real' },
+    FlightUUID      => { },
+    CentralWaveLength => { },
+    BandName        => { },
+    RigName         => { },
+    RigCameraIndex  => { },
+    BandName        => { List => 'Seq' },
+    IMUAngularVelocity => {
+        Binary => 1,
+        ValueConv => 'Image::ExifTool::XMP::DecodeBase64($val)',
+        ValueConvInv => 'Image::ExifTool::XMP::EncodeBase64($val)',
+    },
+);
+
+# Custom XMP namespace for On1 software
+%Image::ExifTool::UserDefined::onone = (
+    GROUPS    => { 0 => 'XMP', 1 => 'XMP-onone', 2 => 'Other' },
+    NAMESPACE => { 'onone' => 'http://www.ononesoftware.com/vcb/1.0/' },
+    WRITABLE  => 'string',
+    UserFlag  => { },
+);
+
+# Custom XMP Namespace for Adobe CQ / AEM Properties
+%Image::ExifTool::UserDefined::cq = (
+    GROUPS => { 0 => 'XMP', 1 => 'XMP-cq', 2 => 'Image' },
+    NAMESPACE => { 'cq' => 'http://www.day.com/jcr/cq/1.0' },
+    WRITABLE => 'string',
+    tags => { List => 'Bag' },
+);
+
+
+%Image::ExifTool::UserDefined::FileTypes = (
+    '3dc' => {
+        Description => '3DC Point Cloud',
+    },
+    '3ds' => {
+        MIMEType => 'image/x-3ds',
+        Description => '3D Studio Max',
+    },
+    '7z' => {
+        MIMEType => 'application/x-7z-compressed',
+        Description => '7-Zip archive',
+    },
+    'aae' => {
+        BaseType => 'XML',
+        MIMEType => 'text/xml',
+        Description => 'Apple Adjustments and Edits sidecar',
+    },
+    'ac' => {
+        Description => 'AC3D',
+    },
+    'acb' => {
+        BaseType => 'XML',
+        Description => 'AutoCAD Color Book',
+    },
+    'acbl' => {
+        BaseType => 'XML',
+        Description => 'Adobe Color Book Legacy',
+    },
+    'acf' => {
+        BaseType => 'TXT',
+        Description => 'ASCII Color Format',
+    },
+    'aco' => {
+        Description => 'Adobe Color Swatch',
+    },
+    'ase' => {
+        Description => 'Adobe Swatch Exchange',
+    },
+    'avs' => {
+        Description => 'AVS X image',
+    },
+    'blend' => {
+        MIMEType => 'application/vnd.blender.blend',
+        Description => 'Blender document',
+    },
+    'bvh' => {
+        Description => 'Biovision Hierarchical motion capture data',
+    },
+    'c2paws' => {
+        MIMEType => 'application/json',
+        Description => 'C2PA Working Store document',
+    },
+    'cin' => {
+        Description => 'Kodak Cineon',
+    },
+    'costyle' => {
+        BaseType => 'XML',
+        Description => 'Capture One Style',
+    },
+    'costylepack' => {
+        BaseType => 'ZIP',
+        Description => 'Capture One Style Package',
+    },
+    'cxf' => {
+        BaseType => 'XML',
+        Description => 'Color Exchange Format',
+    },
+    'dae' => {
+        MIMEType => 'model/vnd.collada+xml',
+        Description => 'Collada Digital Asset Exchange',
+    },
+    'dcx' => {
+        MIMEType => 'image/x-dcx',
+        Description => 'Multipage PCX',
+    },
+    'dib' => {
+        MIMEType => 'image/bmp',
+        Description => 'Microsoft Device Independent Bitmap',
+    },
+    'dwb' => {
+        Description => 'Coryphaeus Designers Workbench',
+    },
+    'dwf' => {
+        MIMEType => 'model/vnd.dwf',
+        Description => 'Autodesk Design Web Format',
+    },
+    'epub' => {
+        Description => 'Electronic Publication',
+    },
+    'eip' => {
+        BaseType => 'ZIP',
+        MIMEType => 'multipart/zip',
+        Description => 'Phase One Enhanced Image Package',
+    },
+    'fax' => {
+        Description => 'FAX image',
+    },
+    'ff' => {
+        Description => 'Farbfeld Format',
+    },
+    'fits' => {
+        MIMEType => 'image/fits',
+        Description => 'Flexible Image Transport System',
+    },
+    'flif' => {
+        Description => 'Free Lossless Image Format',
+    },
+    'fbx' => {
+        Description => 'Autodesk Filmbox',
+    },
+    'flt' => {
+        Description => 'OpenFlight',
+    },
+    'geo' => {
+        Description => 'Carbon Graphics Geo format',
+    },
+    'graffle' => {
+        Description => 'OmniGraffle document',
+    },
+    'gta' => {
+        Description => 'Generic Tagged Arrays',
+    },
+    'heifs' => {
+        Description => 'High Efficiency Image Format Sequence',
+    },
+    'iv' => {
+        Description => 'SGI Inventor',
+    },
+    'ive' => {
+        Description => 'OpenSceneGraph binary format',
+    },
+    'jfif' => {
+        BaseType => 'JPEG',
+        MIMEType => 'image/jpeg',
+        Description => 'JPEG File Interchange Format',
+    },
+    'jps' => {
+        BaseType => 'JPEG',
+        MIMEType => 'image/x-jps',
+        Description => 'JPEG Stereo',
+    },
+    'kmz' => {
+        Description => 'Keyhole Markup Language',
+    },
+    'lcp' => {
+        BaseType => 'XMP',
+        Description => 'Adobe Lens Correction Profile',
+    },
+    'lmp' => {
+        BaseType => 'PLIST',
+        Description => 'Skylum Luminar Look',
+    },
+    'lrtemplate' => {
+        BaseType => 'TXT',
+        Description => 'Adobe Lightroom Template',
+    },
+    'lwo' => {
+        MIMEType => 'application/x-lightwave',
+        Description => 'Lightwave Object',
+    },
+    'lws' => {
+        Description => 'Lightwave Scene',
+    },
+    'm4r' => {
+        BaseType => 'M4A',
+        MIMEType => 'audio/mp4',
+        Description => 'MPEG-4 Ringtone',
+    },
+    'mplumpack' => {
+        BaseType => 'ZIP',
+        Description => 'Skylum Luminar Looks Package',
+    },
+    'mtv' => {
+        Description => 'MTV Raytracing image',
+    },
+    'nksc' => {
+        MIMEType => 'application/octet-stream',
+        Description => 'Nikon Sidecar',
+    },
+    'obj' => {
+        Description => 'Wavefront 3D',
+    },
+    'opml' => {
+        Description => 'Outline Processor Markup Language',
+    },
+    'osg' => {
+        Description => 'OpenSceneGraph ASCII format',
+    },
+    'osgb' => {
+        Description => 'OpenSceneGraph',
+    },
+    'osgt' => {
+        Description => 'OpenSceneGraph',
+    },
+    'otb' => {
+        Description => 'On-the-Air Bitmap',
+    },
+    'palm' => {
+        Description => 'Palm Pixmap',
+    },
+    'pam' => {
+        Description => 'Portable Arbitrary Map',
+    },
+    'pcx' => {
+        Description => 'Personal Computer Exchange',
+    },
+    'pfm' => {
+        Description => 'Portable FloatMap Format',
+    },
+    'ply' => {
+        Description => 'Polygon file',
+    },
+    'pxd' => {
+        BaseType => 'ZIP',
+        Description => 'Pixelmator Pro Document',
+    },
+    'pxr' => {
+        Description => 'Pixar Image',
+    },
+    'qcl' => {
+        BaseType => 'XML',
+        Description => 'QuarkXPress Color Library',
+    },
+    'qoi' => {
+        MIMEType => 'image/qoi',
+        Description => 'Quite OK Image Format',
+    },
+    'ras' => {
+        Description => 'Sun Raster Format',
+    },
+    'sal' => {
+        BaseType => 'PLIST',
+        Description => 'Skylum Aurora HDR Look',
+    },
+    'salpk' => {
+        BaseType => 'ZIP',
+        Description => 'Skylum Aurora HDR Looks Package',
+    },
+    'sct' => {
+        MIMEType => 'application/scitex',
+        Description => 'Scitex Continuous Tone image',
+    },
+    'shp' => {
+        Description => 'Shape 3D',
+    },
+    'skp' => {
+        MIMEType => 'application/vnd.sketchup.skp',
+        Description => 'Google SketchUp',
+    },
+    'stl' => {
+        Description => 'Standard Tesselation Language',
+    },
+    'tga' => {
+        MIMEType => 'image/x-tga',
+        Description => 'Truevision TGA (TARGA) image',
+    },
+    'vcard' => {
+        MIMEType => 'text/vcard',
+        Description => 'Virtual Contact Card',
+    },
+    'vcf' => {
+        MIMEType => 'text/x-vcard',
+        Description => 'Virtual Contact File',
+    },
+    'vdx' => {
+        BaseType => 'XMP',
+        MIMEType => 'application/vnd.visio',
+        Description => 'Microsoft Visio XML Drawing',
+    },
+    'vicar' => {
+        Description => 'Video Image Communication and Retrieval',
+    },
+    'viff' => {
+        Description => 'Khoros Visualization/Image File Format',
+    },
+    'wbmp' => {
+        Description => 'Wireless Bitmap',
+    },
+    'wrl' => {
+        MIMEType => 'model/vrml',
+        Description => 'Virtual Reality Modeling Language',
+    },
+    'x' => {
+        Description => 'DirectX',
+    },
+    'x3i' => {
+        MIMEType => 'image/x-sigma-x3i',
+        Description => 'Sigma Raw format (SFD Mode)',
+    },
+    'xpm' => {
+        Description => 'X Window pixmap',
+    },
+    'zxp' => {
+        BaseType => 'ZIP',
+        MIMEType => 'application/vnd.adobe.air-ucf-package+zip',
+        Description => 'Adobe Zip Format Extension Package',
+    },
+);
+
+
+%Image::ExifTool::Shortcuts::UserDefined = (
+    # create "AllPaths" shortcut for all Photoshop path tags
+    AllPaths => [
+        map { sprintf "Path%x", $_ } (0x401, 0x7d0 .. 0xbb5),
+    ],
+    AllPathPix => [
+        map { sprintf "PathPix%x", $_ } (0x401, 0x7d0 .. 0xbb5),
+    ],
+);
+
+# Must set undocumented SaveFormat option to provide access to the tag format types
+%Image::ExifTool::UserDefined::Options = (
+    SaveFormat => 1,
+);
+
+1;  #end
