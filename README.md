@@ -1,9 +1,8 @@
 # @colorhythm/exiftool-config
 
-Colorhythm's production [ExifTool](https://exiftool.org) config, in
-daily DAM service for years — shared in the same spirit as Phil
-Harvey's distributed example config, which several of these composites
-build upon.
+Colorhythm's production [ExifTool](https://exiftool.org) config —
+shared in the same spirit as Phil Harvey's distributed example
+config, which several of these composites build upon.
 
 ## The headline: Photoshop path analytics
 
@@ -29,16 +28,10 @@ its revision history preserved in this file. Our copy diverged from
 his ~2017 revision with contributions of our own: folding
 **working-path (0x401)** coverage into the path range years before it
 landed upstream, small decoder adjustments earned in production, and
-the **clipping-designation trailer decode** — upstream ExifTool reads
-the 0x0BB7 resource's Pascal name and notes "6 bytes of unknown data
-after string"; those bytes are a 16.16 fixed-point flatness and a
-fill rule, which this config surfaces as `ClippingPathFlatness` and
-`ClippingPathFillRule` (byte layout proven by round-tripping paths
-through Photoshop in our production tooling).
-
-Useful for auditing clipping-path work at scale, triaging retouch
-vendors' deliveries, or building datasets of professionally pathed
-imagery.
+the **clipping-designation trailer decode**; those bytes are a 16.16
+fixed-point flatness and a fill rule, which this config surfaces as
+`ClippingPathFlatness` and `ClippingPathFillRule` (byte layout proven
+by round-tripping paths through Photoshop).
 
 **Dependency-free**: core Perl only — no JSON.pm or other non-core
 modules — so it runs on minimal perls, including wasm builds of
