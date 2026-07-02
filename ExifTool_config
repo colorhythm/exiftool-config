@@ -169,6 +169,34 @@ sub PrintPath($$;$$)
 
 %Image::ExifTool::UserDefined = (
     'Image::ExifTool::Photoshop::Main' => {
+        0xbb7 => {
+            Name => 'ClippingPathName',
+            # Override of the built-in tag: same name and value, but also
+            # decodes the 6 bytes the core module notes as "unknown data
+            # after string" — a 16.16 fixed-point flatness (device pixels)
+            # and a uint16 fill rule (0 = same as path, 1 = even-odd,
+            # 2 = nonzero winding). Values surface through the Composite
+            # ClippingPathFlatness and ClippingPathFillRule tags. Older
+            # or third-party writers may emit a name-only resource, in
+            # which case neither composite is generated.
+            RawConv => q{
+                my $len = ord($val);
+                SetByteOrder('MM');
+                if (length($val) >= $len + 5) {
+                    $$self{ClippingPathFlatness} = Get32s(\$val, $len + 1) / 0x10000;
+                }
+                if (length($val) >= $len + 7) {
+                    $$self{ClippingPathFillRule} = Get16u(\$val, $len + 5);
+                }
+                return $val;
+            },
+            # (value conversion matches the built-in tag)
+            ValueConv => q{
+                my $len = ord($val);
+                $val = substr($val, 0, $len+1) if $len < length($val);
+                return Image::ExifTool::Photoshop::ConvertPascalString($self,$val);
+            },
+        },
         0xbb8 => {
             Name => 'OriginPathInfo',
             Flags => [ qw(Writable Protected Binary SetResourceName) ],
@@ -477,6 +505,22 @@ sub PrintPath($$;$$)
         TotalPathPoints => {
             Require => 'PathCount',
             ValueConv => '$$self{TotalPathPoints}',
+        },
+        # clipping-path designation trailer (resource 0x0BB7): decoded by
+        # our ClippingPathName override above. Not generated for name-only
+        # designations written by older or third-party software.
+        ClippingPathFlatness => {
+            Require => 'Photoshop:ClippingPathName',
+            ValueConv => '$$self{ClippingPathFlatness}',
+        },
+        ClippingPathFillRule => {
+            Require => 'Photoshop:ClippingPathName',
+            ValueConv => '$$self{ClippingPathFillRule}',
+            PrintConv => {
+                0 => 'Same as Path',
+                1 => 'Even-Odd',
+                2 => 'Nonzero Winding',
+            },
         },
         map { sprintf('PathPix%x', $_) => {
             Require => {

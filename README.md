@@ -16,17 +16,25 @@ metadata:
 | `PathCount` | How many saved paths the file carries |
 | `TotalPathPoints` | Total knot count across all paths |
 | `UniquePathPoints` | Deduplicated knot count (collapses coincident points) |
+| `ClippingPathFlatness` | Device-pixel flatness from the clipping designation (0x0BB7) |
+| `ClippingPathFillRule` | Clipping fill rule: same-as-path / even-odd / nonzero winding |
 
 ```sh
 exiftool -config ExifTool_config -PathCount -TotalPathPoints image.psd
 ```
 
-The path decoder and these counting composites are **Phil Harvey's
+The path decoder and the counting composites are **Phil Harvey's
 work** — his `photoshop_paths.config` (distributed with ExifTool), with
 its revision history preserved in this file. Our copy diverged from
-his ~2017 revision with some contributions of our own, notably folding
+his ~2017 revision with contributions of our own: folding
 **working-path (0x401)** coverage into the path range years before it
-landed upstream, plus small decoder adjustments earned in production.
+landed upstream, small decoder adjustments earned in production, and
+the **clipping-designation trailer decode** — upstream ExifTool reads
+the 0x0BB7 resource's Pascal name and notes "6 bytes of unknown data
+after string"; those bytes are a 16.16 fixed-point flatness and a
+fill rule, which this config surfaces as `ClippingPathFlatness` and
+`ClippingPathFillRule` (byte layout proven by round-tripping paths
+through Photoshop in our production tooling).
 
 Useful for auditing clipping-path work at scale, triaging retouch
 vendors' deliveries, or building datasets of professionally pathed
@@ -89,7 +97,9 @@ with ExifTool: the Photoshop path section is his
 `UniquePathPoints` — revision history preserved in-file), and
 `BigImage` follows the largest-preview pattern from his example
 config. Colorhythm's contributions: the working-path (0x401) range
-extension and decoder adjustments, the drone/multispectral XMP
-namespaces, the workflow composites, the JSON-free `sPLT` handler, and
-the curation of it all into one dependency-free file. ExifTool itself
+extension and decoder adjustments, the clipping-designation trailer
+decode (`ClippingPathFlatness` / `ClippingPathFillRule`), the
+drone/multispectral XMP namespaces, the workflow composites, the
+JSON-free `sPLT` handler, and the curation of it all into one
+dependency-free file. ExifTool itself
 is Phil Harvey's, licensed under the same terms as Perl.
