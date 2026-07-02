@@ -1,6 +1,6 @@
 {
 	"name": "@colorhythm/exiftool-config",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Colorhythm's production ExifTool config: Photoshop path analytics (PathCount, UniquePathPoints, TotalPathPoints), largest-preview selection (BigImage), PNG transparency surfacing, drone/multispectral XMP namespaces, and workflow composites.",
 	"license": "MIT",
 	"author": "Colorhythm LLC",
