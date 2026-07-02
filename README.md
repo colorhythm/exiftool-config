@@ -7,8 +7,9 @@ build upon.
 
 ## The headline: Photoshop path analytics
 
-To our knowledge the only published composites that analyze **Photoshop
-saved paths (8BIM resources 0x7D0–0xBB5)** directly from file metadata:
+Composites that analyze **Photoshop paths (8BIM resources
+0x7D0–0xBB5, plus the working path 0x401)** directly from file
+metadata:
 
 | Tag | What it tells you |
 |---|---|
@@ -19,6 +20,13 @@ saved paths (8BIM resources 0x7D0–0xBB5)** directly from file metadata:
 ```sh
 exiftool -config ExifTool_config -PathCount -TotalPathPoints image.psd
 ```
+
+The path decoder and these counting composites are **Phil Harvey's
+work** — his `photoshop_paths.config` (distributed with ExifTool), with
+its revision history preserved in this file. Our copy diverged from
+his ~2017 revision with some contributions of our own, notably folding
+**working-path (0x401)** coverage into the path range years before it
+landed upstream, plus small decoder adjustments earned in production.
 
 Useful for auditing clipping-path work at scale, triaging retouch
 vendors' deliveries, or building datasets of professionally pathed
@@ -75,7 +83,13 @@ const result = await parseMetadata(file, {
 
 ## Provenance & license
 
-MIT. Portions derive from the example config distributed with ExifTool
-(notably the largest-preview selection pattern); the path-analytics
-composites and workflow tags are original Colorhythm work. ExifTool
-itself is Phil Harvey's, licensed under the same terms as Perl.
+MIT. Substantial portions derive from configs Phil Harvey distributes
+with ExifTool: the Photoshop path section is his
+`photoshop_paths.config` (decoder, `PathCount`, `TotalPathPoints`,
+`UniquePathPoints` — revision history preserved in-file), and
+`BigImage` follows the largest-preview pattern from his example
+config. Colorhythm's contributions: the working-path (0x401) range
+extension and decoder adjustments, the drone/multispectral XMP
+namespaces, the workflow composites, the JSON-free `sPLT` handler, and
+the curation of it all into one dependency-free file. ExifTool itself
+is Phil Harvey's, licensed under the same terms as Perl.
